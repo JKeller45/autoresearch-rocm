@@ -609,8 +609,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset",
         choices=DATASET_CHOICES,
-        default=DEFAULT_DATASET,
-        help="Dataset profile to prepare.",
+        default=None,
+        help=(
+            "Dataset profile to prepare. If omitted, resolves in order: "
+            "AUTORESEARCH_DATASET, active_dataset.txt, then default tinystories."
+        ),
     )
     parser.add_argument(
         "--num-shards",

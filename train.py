@@ -41,8 +41,10 @@ class RuntimeConfig:
     amp_dtype: torch.dtype
     use_compile: bool
     use_fa3: bool
+    use_activation_checkpointing: bool
     attention_backend: str
     gpu_name: str
+    gpu_vram_gb: float
     gpu_peak_flops: float
     fa3_interface: object | None
 
@@ -71,6 +73,7 @@ def detect_runtime():
     is_windows = platform.system().lower().startswith("win")
     device = torch.device("cuda")
     gpu_name = torch.cuda.get_device_name()
+    gpu_vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
     amp_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
 
     use_compile = False
@@ -107,14 +110,25 @@ def detect_runtime():
             print(f"FA3 unavailable ({exc}), using SDPA fallback.")
 
     attention_backend = "fa3" if use_fa3 else "sdpa"
+    force_checkpointing = os.environ.get("AUTORESEARCH_FORCE_CHECKPOINTING")
+    if force_checkpointing == "1":
+        use_activation_checkpointing = True
+    elif force_checkpointing == "0":
+        use_activation_checkpointing = False
+    else:
+        # Keep memory savings on consumer cards; preserve throughput on high-VRAM GPUs.
+        use_activation_checkpointing = is_windows or gpu_vram_gb <= 16.0
+
     return RuntimeConfig(
         device=device,
         device_type=device.type,
         amp_dtype=amp_dtype,
         use_compile=use_compile,
         use_fa3=use_fa3,
+        use_activation_checkpointing=use_activation_checkpointing,
         attention_backend=attention_backend,
         gpu_name=gpu_name,
+        gpu_vram_gb=gpu_vram_gb,
         gpu_peak_flops=_get_gpu_peak_flops(gpu_name),
         fa3_interface=fa3_interface,
     )
@@ -146,6 +160,7 @@ class GPTConfig:
     n_embd: int = 768
     window_pattern: str = "SSSL"
     attention_backend: str = "fa3"
+    use_activation_checkpointing: bool = False
     compute_dtype: torch.dtype = torch.bfloat16
 
 
@@ -195,8 +210,8 @@ class CausalSelfAttention(nn.Module):
         row = torch.arange(seq_len, device=device).unsqueeze(1)
         col = torch.arange(seq_len, device=device).unsqueeze(0)
         mask = col <= row  # causal
-        if window is not None and window > 0 and window < seq_len:
-            mask = mask & (col >= (row - window + 1))
+        if window is not None and window >= 0 and window < seq_len:
+            mask = mask & (col >= (row - window))
         self._mask_cache[cache_key] = mask
         return mask
 
@@ -436,7 +451,10 @@ class GPT(nn.Module):
             x = self.resid_lambdas[i] * x + self.x0_lambdas[i] * x0
             ve = self.value_embeds[str(i)](idx) if str(i) in self.value_embeds else None
             window_size = self.window_sizes[i]
-            x = torch_checkpoint(block, x, ve, cos_sin, window_size, use_reentrant=False)
+            if self.config.use_activation_checkpointing:
+                x = torch_checkpoint(block, x, ve, cos_sin, window_size, use_reentrant=False)
+            else:
+                x = block(x, ve, cos_sin, window_size)
         x = norm(x)
 
         softcap = 15
@@ -646,6 +664,7 @@ def build_model_config(depth, vocab_size, runtime):
         n_embd=model_dim,
         window_pattern=WINDOW_PATTERN,
         attention_backend=runtime.attention_backend,
+        use_activation_checkpointing=runtime.use_activation_checkpointing,
         compute_dtype=runtime.amp_dtype,
     )
 
@@ -858,8 +877,10 @@ def main():
     _configure_step_kernels(runtime)
 
     print(f"GPU: {runtime.gpu_name}")
+    print(f"GPU VRAM: {runtime.gpu_vram_gb:.1f} GB")
     print(f"Attention backend: {runtime.attention_backend}")
     print(f"torch.compile: {'enabled' if USE_COMPILE else 'disabled'}")
+    print(f"activation_checkpointing: {'enabled' if runtime.use_activation_checkpointing else 'disabled'}")
     print(f"AMP dtype: {runtime.amp_dtype}")
 
     tokenizer = Tokenizer.from_directory(dataset=args.dataset)
