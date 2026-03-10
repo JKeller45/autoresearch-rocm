@@ -1,0 +1,5 @@
+# Official ROCm WSL wheel set pinned to the Ubuntu 24.04 / Python 3.12 path.
+# Installed by scripts/setup_rocm_wsl.sh into the repo's .venv.
+https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.1/torch-2.8.0%2Brocm7.2.1.gitf717b2cb-cp312-cp312-linux_x86_64.whl
+https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.1/torchaudio-2.8.0%2Brocm7.2.1.gitd8831425-cp312-cp312-linux_x86_64.whl
+https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.1/torchvision-0.23.0%2Brocm7.2.1.git824e8c87-cp312-cp312-linux_x86_64.whl

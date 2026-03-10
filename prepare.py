@@ -418,7 +418,7 @@ def _document_batches(split, dataset=None, tokenizer_batch_size=128):
         epoch += 1
 
 
-def make_dataloader(tokenizer, B, T, split, device="cuda", dataset=None, buffer_size=1000):
+def make_dataloader(tokenizer, B, T, split, device="cuda", dataset=None, buffer_size=1000, pin_memory=None):
     """
     BOS-aligned dataloader with best-fit packing.
     Every row starts with BOS. Documents packed using best-fit to minimize cropping.
@@ -437,6 +437,10 @@ def make_dataloader(tokenizer, B, T, split, device="cuda", dataset=None, buffer_
     epoch = 1
     resolved_device = torch.device(device)
     use_cuda = resolved_device.type == "cuda"
+    if pin_memory is None:
+        pin_memory = use_cuda
+    else:
+        pin_memory = bool(pin_memory)
 
     def refill_buffer():
         nonlocal epoch
@@ -445,7 +449,7 @@ def make_dataloader(tokenizer, B, T, split, device="cuda", dataset=None, buffer_
         doc_buffer.extend(token_lists)
 
     row_buffer = torch.empty((B, row_capacity), dtype=torch.long)
-    cpu_buffer = torch.empty(2 * B * T, dtype=torch.long, pin_memory=use_cuda)
+    cpu_buffer = torch.empty(2 * B * T, dtype=torch.long, pin_memory=pin_memory)
     cpu_inputs = cpu_buffer[:B * T].view(B, T)
     cpu_targets = cpu_buffer[B * T:].view(B, T)
 
@@ -497,7 +501,7 @@ def make_dataloader(tokenizer, B, T, split, device="cuda", dataset=None, buffer_
 # ---------------------------------------------------------------------------
 
 @torch.no_grad()
-def evaluate_bpb(model, tokenizer, batch_size, device="cuda", dataset=None, eval_tokens=EVAL_TOKENS):
+def evaluate_bpb(model, tokenizer, batch_size, device="cuda", dataset=None, eval_tokens=EVAL_TOKENS, pin_memory=None):
     """
     Bits per byte (BPB): vocab size-independent evaluation metric.
     Sums per-token cross-entropy (in nats), sums target byte lengths,
@@ -513,6 +517,7 @@ def evaluate_bpb(model, tokenizer, batch_size, device="cuda", dataset=None, eval
         "val",
         device=device,
         dataset=dataset_name,
+        pin_memory=pin_memory,
     )
     steps = max(1, eval_tokens // (batch_size * MAX_SEQ_LEN))
     total_nats = 0.0

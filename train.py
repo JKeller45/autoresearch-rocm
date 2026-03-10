@@ -40,23 +40,26 @@ from prepare import (
 class RuntimeConfig:
     device: torch.device
     device_type: str
+    backend_kind: str
+    backend_version: str
+    is_wsl: bool
     amp_dtype: torch.dtype
     use_compile: bool
     use_activation_checkpointing: bool
     attention_backend: str
     gpu_name: str
     gpu_vram_gb: float
-    gpu_peak_flops: float | None
-    gpu_cc: tuple[int, int]
     gpu_total_memory_bytes: int
-    tf32_enabled: bool
-    gpu_profile: "GpuProfile"
+    supports_bf16: bool
+    supports_tf32: bool
+    supports_pinned_memory: bool
+    gpu_profile: "AcceleratorProfile"
 
 
 @dataclass(frozen=True)
-class GpuProfile:
+class AcceleratorProfile:
     name: str
-    is_supported_consumer: bool
+    is_documented_supported: bool
     is_compatibility_only: bool
     train_batch_candidates: tuple[int, ...]
     checkpoint_modes: tuple[bool, ...]
@@ -64,132 +67,70 @@ class GpuProfile:
     eval_batch_cap: int = 16
 
 
-SUPPORTED_CONSUMER_CAPABILITIES = {
-    (7, 5): "turing",
-    (8, 6): "ampere",
-    (8, 9): "ada",
-    (12, 0): "blackwell",
-}
-MIN_SUPPORTED_VRAM_GB_BY_ARCH = {
-    "turing": 8.0,
-    "ampere": 10.0,
-    "ada": 10.0,
-    "blackwell": 10.0,
-}
 AUTOTUNE_WARMUP_STEPS = 2
 AUTOTUNE_MEASURE_STEPS = 3
 AUTOTUNE_MAX_MEMORY_FRACTION = 0.90
-AUTOTUNE_CACHE_VERSION = "gpu-profile-v2"
+AUTOTUNE_CACHE_VERSION = "rocm-profile-v1"
 
 
-def _get_gpu_peak_flops(gpu_name):
+def _is_wsl():
+    if os.environ.get("WSL_INTEROP"):
+        return True
+    release = platform.uname().release.lower()
+    return "microsoft" in release or "wsl" in release
+
+
+def _resolve_accelerator_profile(gpu_name, gpu_vram_gb, is_wsl):
     name = gpu_name.lower()
-    lookup = (
-        ("5090", 360.0e12),
-        ("4090 d", 280.0e12),
-        ("4090d", 280.0e12),
-        ("4090", 330.3e12),
-        ("5080", 280.0e12),
-        ("4080 super", 260.0e12),
-        ("4070 ti super", 176.4e12),
-        ("4070 ti", 160.4e12),
-        ("4070 super", 142.2e12),
-        ("4070", 116.8e12),
-        ("4080", 242.5e12),
-        ("5070 ti", 190.0e12),
-        ("5070", 150.0e12),
-        ("5060 ti", 120.0e12),
-        ("4060 ti", 88.4e12),
-        ("2080 ti", 107.5e12),
-        ("2080 super", 89.6e12),
-        ("2080", 80.3e12),
-        ("2070 super", 72.6e12),
-        ("2070", 59.7e12),
-        ("2060 super", 57.4e12),
-        ("2060", 52.4e12),
-        ("3090 ti", 160.0e12),
-        ("3090", 142.6e12),
-        ("3080 ti", 136.0e12),
-        ("3080", 119.5e12),
-        ("3060", 51.0e12),
-        ("3070", 81.1e12),
-    )
-    for key, flops in lookup:
-        if key in name:
-            return flops
-    return None
+    is_radeon = "radeon" in name or "amd" in name or "gfx" in name
+    documented_supported = is_radeon and is_wsl
 
-
-def _resolve_gpu_profile(gpu_name, capability, gpu_vram_gb, is_windows):
-    name = gpu_name.lower()
-    arch = SUPPORTED_CONSUMER_CAPABILITIES.get(capability)
-    min_vram_gb = MIN_SUPPORTED_VRAM_GB_BY_ARCH.get(arch, float("inf"))
-    is_rtx = "rtx" in name
-    is_laptop = "laptop" in name
-    supported_consumer = is_rtx and not is_laptop and arch is not None and gpu_vram_gb >= min_vram_gb
-
-    if supported_consumer:
-        if arch == "turing" and gpu_vram_gb < 12.0:
-            return GpuProfile(
-                name=f"{arch}-8-11gb",
-                is_supported_consumer=True,
-                is_compatibility_only=False,
-                train_batch_candidates=(8, 4, 2, 1),
-                checkpoint_modes=(True,),
-                default_checkpointing=True,
-                eval_batch_cap=4,
-            )
-        if gpu_vram_gb < 16.0:
-            mid_tier_name = f"{arch}-12-15gb" if arch == "turing" else f"{arch}-10-15gb"
-            return GpuProfile(
-                name=mid_tier_name,
-                is_supported_consumer=True,
-                is_compatibility_only=False,
-                train_batch_candidates=(16, 8, 4),
-                checkpoint_modes=(True,),
-                default_checkpointing=True,
-            )
-        if gpu_vram_gb < 24.0:
-            return GpuProfile(
-                name=f"{arch}-16gb",
-                is_supported_consumer=True,
-                is_compatibility_only=False,
-                train_batch_candidates=(32, 16, 8, 4),
-                checkpoint_modes=(False, True),
-                default_checkpointing=False,
-            )
-        return GpuProfile(
-            name=f"{arch}-24gb-plus",
-            is_supported_consumer=True,
-            is_compatibility_only=False,
-            train_batch_candidates=(64, 32, 16, 8, 4),
-            checkpoint_modes=(False, True),
-            default_checkpointing=False,
+    if gpu_vram_gb < 12.0:
+        return AcceleratorProfile(
+            name="rocm-8-11gb",
+            is_documented_supported=documented_supported,
+            is_compatibility_only=not documented_supported,
+            train_batch_candidates=(4, 2, 1),
+            checkpoint_modes=(True,),
+            default_checkpointing=True,
+            eval_batch_cap=2,
         )
-
-    default_checkpointing = is_windows or gpu_vram_gb <= 16.0
-    return GpuProfile(
-        name="compatibility",
-        is_supported_consumer=False,
-        is_compatibility_only=True,
-        train_batch_candidates=(DEVICE_BATCH_SIZE, 16, 8, 4),
-        checkpoint_modes=(default_checkpointing,),
-        default_checkpointing=default_checkpointing,
+    if gpu_vram_gb < 16.0:
+        return AcceleratorProfile(
+            name="rocm-12-15gb",
+            is_documented_supported=documented_supported,
+            is_compatibility_only=not documented_supported,
+            train_batch_candidates=(8, 4, 2),
+            checkpoint_modes=(True,),
+            default_checkpointing=True,
+            eval_batch_cap=4,
+        )
+    if gpu_vram_gb < 24.0:
+        return AcceleratorProfile(
+            name="rocm-16-23gb",
+            is_documented_supported=documented_supported,
+            is_compatibility_only=not documented_supported,
+            train_batch_candidates=(16, 8, 4),
+            checkpoint_modes=(True,),
+            default_checkpointing=True,
+            eval_batch_cap=8,
+        )
+    return AcceleratorProfile(
+        name="rocm-24gb-plus",
+        is_documented_supported=documented_supported,
+        is_compatibility_only=not documented_supported,
+        train_batch_candidates=(32, 16, 8, 4),
+        checkpoint_modes=(False, True),
+        default_checkpointing=False,
     )
 
 
-def _compatibility_warning(gpu_name, capability, gpu_vram_gb):
+def _compatibility_warning(gpu_name, is_wsl):
     name = gpu_name.lower()
-    arch = SUPPORTED_CONSUMER_CAPABILITIES.get(capability)
-    if "rtx" not in name:
-        return None
-    if "laptop" in name:
-        return "laptop GPUs are outside the supported desktop matrix"
-    if arch is None:
-        return f"compute capability {capability[0]}.{capability[1]} is outside supported consumer tiers"
-    min_vram_gb = MIN_SUPPORTED_VRAM_GB_BY_ARCH.get(arch, float("inf"))
-    if gpu_vram_gb < min_vram_gb:
-        return f"{gpu_vram_gb:.1f} GB VRAM is below the {min_vram_gb:g} GB floor for {arch}"
+    if "radeon" not in name and "amd" not in name and "gfx" not in name:
+        return f"GPU '{gpu_name}' does not look like an AMD Radeon device"
+    if not is_wsl:
+        return "official repo support is WSL2 on Windows; continuing in compatibility mode"
     return None
 
 
@@ -228,11 +169,11 @@ def _save_autotune_entries(path, entries):
 
 
 def _make_autotune_cache_key(runtime):
-    cc = f"{runtime.gpu_cc[0]}.{runtime.gpu_cc[1]}"
     return "|".join(
         [
+            runtime.backend_kind,
+            runtime.backend_version,
             runtime.gpu_name,
-            cc,
             str(runtime.gpu_total_memory_bytes),
             torch.__version__,
             platform.system(),
@@ -241,33 +182,48 @@ def _make_autotune_cache_key(runtime):
     )
 
 
-def _select_amp_dtype(gpu_cc):
-    if gpu_cc >= (8, 0) and torch.cuda.is_bf16_supported(including_emulation=False):
+def _select_amp_dtype(supports_bf16):
+    override = os.environ.get("AUTORESEARCH_FORCE_AMP_DTYPE", "").strip().lower()
+    if override:
+        if override == "bf16":
+            if not supports_bf16:
+                raise RuntimeError("AUTORESEARCH_FORCE_AMP_DTYPE=bf16 requested but BF16 is not supported.")
+            return torch.bfloat16
+        if override == "fp16":
+            return torch.float16
+        raise RuntimeError("AUTORESEARCH_FORCE_AMP_DTYPE must be one of: bf16, fp16.")
+    if supports_bf16:
         return torch.bfloat16
     return torch.float16
 
 
 def detect_runtime():
     if not torch.cuda.is_available():
-        raise RuntimeError("CUDA is required. No CUDA device detected.")
+        raise RuntimeError("ROCm is required. No HIP-compatible accelerator was detected.")
 
-    is_windows = platform.system().lower().startswith("win")
+    if platform.system().lower().startswith("win"):
+        raise RuntimeError("Native Windows Radeon training is not supported in this fork. Use WSL2.")
+
+    hip_version = getattr(torch.version, "hip", None)
+    if not hip_version:
+        raise RuntimeError("PyTorch HIP runtime is required. Install the AMD ROCm WSL wheel set.")
+
+    is_wsl = _is_wsl()
     device = torch.device("cuda")
     props = torch.cuda.get_device_properties(0)
     gpu_name = torch.cuda.get_device_name()
     gpu_total_memory_bytes = int(props.total_memory)
     gpu_vram_gb = gpu_total_memory_bytes / (1024 ** 3)
-    gpu_cc = torch.cuda.get_device_capability()
-    gpu_profile = _resolve_gpu_profile(gpu_name, gpu_cc, gpu_vram_gb, is_windows)
-    warning = _compatibility_warning(gpu_name, gpu_cc, gpu_vram_gb)
+    gpu_profile = _resolve_accelerator_profile(gpu_name, gpu_vram_gb, is_wsl)
+    warning = _compatibility_warning(gpu_name, is_wsl)
     if warning is not None:
         print(f"Warning: {warning}; running compatibility runtime path.")
 
-    amp_dtype = _select_amp_dtype(gpu_cc)
-    tf32_enabled = bool(getattr(torch.cuda, "is_tf32_supported", lambda: False)())
-    torch.backends.cuda.matmul.allow_tf32 = tf32_enabled
-    if hasattr(torch.backends, "cudnn"):
-        torch.backends.cudnn.allow_tf32 = tf32_enabled
+    supports_bf16 = bool(getattr(torch.cuda, "is_bf16_supported", lambda including_emulation=False: False)(including_emulation=False))
+    amp_dtype = _select_amp_dtype(supports_bf16)
+    supports_pinned_memory = os.environ.get("AUTORESEARCH_DISABLE_PINNED_MEMORY", "0") != "1"
+    if hasattr(torch.backends, "cuda") and hasattr(torch.backends.cuda, "matmul"):
+        torch.backends.cuda.matmul.allow_tf32 = False
 
     use_compile = False
     print("torch.compile disabled in this fork runtime path.")
@@ -284,16 +240,19 @@ def detect_runtime():
     return RuntimeConfig(
         device=device,
         device_type=device.type,
+        backend_kind="rocm",
+        backend_version=hip_version,
+        is_wsl=is_wsl,
         amp_dtype=amp_dtype,
         use_compile=use_compile,
         use_activation_checkpointing=use_activation_checkpointing,
         attention_backend=attention_backend,
         gpu_name=gpu_name,
         gpu_vram_gb=gpu_vram_gb,
-        gpu_peak_flops=_get_gpu_peak_flops(gpu_name),
-        gpu_cc=gpu_cc,
         gpu_total_memory_bytes=gpu_total_memory_bytes,
-        tf32_enabled=tf32_enabled,
+        supports_bf16=supports_bf16,
+        supports_tf32=False,
+        supports_pinned_memory=supports_pinned_memory,
         gpu_profile=gpu_profile,
     )
 
@@ -321,6 +280,7 @@ class GPTConfig:
     n_embd: int = 768
     window_pattern: str = "SSSL"
     attention_backend: str = "sdpa"
+    backend_kind: str = "rocm"
     use_activation_checkpointing: bool = False
     compute_dtype: torch.dtype = torch.bfloat16
 
@@ -351,6 +311,7 @@ class CausalSelfAttention(nn.Module):
         self.n_embd = config.n_embd
         self.head_dim = self.n_embd // self.n_head
         self.attention_backend = config.attention_backend
+        self.backend_kind = config.backend_kind
         assert self.n_embd % self.n_head == 0
         assert self.n_kv_head <= self.n_head and self.n_head % self.n_kv_head == 0
         self.c_q = nn.Linear(self.n_embd, self.n_head * self.head_dim, bias=False)
@@ -395,13 +356,19 @@ class CausalSelfAttention(nn.Module):
         k = k.transpose(1, 2)  # (B, KVH, T, D)
         v = v.transpose(1, 2)  # (B, KVH, T, D)
         attn_mask = self._get_sdpa_mask(T, window_size, q.device)
+        enable_gqa = self.n_kv_head < self.n_head
+        if enable_gqa and self.backend_kind == "rocm":
+            repeat_factor = self.n_head // self.n_kv_head
+            k = k.repeat_interleave(repeat_factor, dim=1)
+            v = v.repeat_interleave(repeat_factor, dim=1)
+            enable_gqa = False
         y = F.scaled_dot_product_attention(
             q,
             k,
             v,
             attn_mask=attn_mask,
             is_causal=False,
-            enable_gqa=self.n_kv_head < self.n_head,
+            enable_gqa=enable_gqa,
         )
         y = y.transpose(1, 2)
 
@@ -824,6 +791,7 @@ def build_model_config(depth, vocab_size, runtime, use_activation_checkpointing=
         n_embd=model_dim,
         window_pattern=WINDOW_PATTERN,
         attention_backend=runtime.attention_backend,
+        backend_kind=runtime.backend_kind,
         use_activation_checkpointing=use_activation_checkpointing,
         compute_dtype=runtime.amp_dtype,
     )
@@ -903,6 +871,7 @@ def _benchmark_train_candidate(runtime, tokenizer, vocab_size, train_batch_size,
             "train",
             device=runtime.device,
             dataset=tokenizer.dataset,
+            pin_memory=runtime.supports_pinned_memory,
         )
         x, y, _ = next(train_loader)
         torch.cuda.empty_cache()
@@ -947,7 +916,7 @@ def _benchmark_train_candidate(runtime, tokenizer, vocab_size, train_batch_size,
 
 
 def _autotune_train_candidate(runtime, tokenizer, vocab_size, train_candidates):
-    if not runtime.gpu_profile.is_supported_consumer:
+    if not runtime.gpu_profile.is_documented_supported:
         return None
     if os.environ.get("AUTORESEARCH_DISABLE_AUTOTUNE", "0") == "1":
         print("Autotune disabled by AUTORESEARCH_DISABLE_AUTOTUNE=1.")
@@ -1071,6 +1040,7 @@ def _run_training_once(runtime, tokenizer, config, device_batch_size, smoke_test
         "train",
         device=runtime.device,
         dataset=tokenizer.dataset,
+        pin_memory=runtime.supports_pinned_memory,
     )
     x, y, epoch = next(train_loader)
     print(f"Time budget: {TIME_BUDGET}s")
@@ -1137,11 +1107,7 @@ def _run_training_once(runtime, tokenizer, config, device_batch_size, smoke_test
         debiased_smooth_loss = smooth_train_loss / (1 - ema_beta ** (step + 1))
         pct_done = 100 * progress
         tok_per_sec = int(TOTAL_BATCH_SIZE / dt)
-        if runtime.gpu_peak_flops:
-            mfu = 100 * num_flops_per_token * TOTAL_BATCH_SIZE / dt / runtime.gpu_peak_flops
-            mfu_text = f"{mfu:.1f}%"
-        else:
-            mfu_text = "n/a"
+        mfu_text = "n/a"
         remaining = max(0, target_training_seconds - total_training_time)
         print(
             f"\rstep {step:05d} ({pct_done:.1f}%) | loss: {debiased_smooth_loss:.6f} | "
@@ -1201,12 +1167,15 @@ def main():
     args = parser.parse_args()
 
     runtime = detect_runtime()
+    print(f"Backend: {runtime.backend_kind}")
+    print(f"Backend version: {runtime.backend_version}")
+    print(f"WSL2: {'yes' if runtime.is_wsl else 'no'}")
     print(f"GPU: {runtime.gpu_name}")
     print(f"GPU VRAM: {runtime.gpu_vram_gb:.1f} GB")
-    print(f"GPU CC: {runtime.gpu_cc[0]}.{runtime.gpu_cc[1]}")
     print(f"GPU profile: {runtime.gpu_profile.name}")
-    print(f"Consumer matrix support: {'yes' if runtime.gpu_profile.is_supported_consumer else 'compatibility path'}")
-    print(f"TF32: {'enabled' if runtime.tf32_enabled else 'disabled'}")
+    print(f"Documented support: {'yes' if runtime.gpu_profile.is_documented_supported else 'compatibility path'}")
+    print(f"TF32: {'enabled' if runtime.supports_tf32 else 'disabled'}")
+    print(f"Pinned memory: {'enabled' if runtime.supports_pinned_memory else 'disabled'}")
     print(f"AMP dtype: {runtime.amp_dtype}")
 
     tokenizer = Tokenizer.from_directory(dataset=args.dataset)
@@ -1288,6 +1257,7 @@ def main():
                     device=runtime.device,
                     dataset=tokenizer.dataset,
                     eval_tokens=eval_tokens,
+                    pin_memory=runtime.supports_pinned_memory,
                 )
             chosen_eval_batch = eval_batch_size
             print(f"Eval completed with batch_size={eval_batch_size}")
@@ -1305,18 +1275,7 @@ def main():
     total_training_time = result["total_training_time"]
     num_flops_per_token = result["num_flops_per_token"]
     num_params = result["num_params"]
-    steady_state_steps = max(step - 10, 0)
-    if runtime.gpu_peak_flops and total_training_time > 0 and steady_state_steps > 0:
-        steady_state_mfu = (
-            100
-            * num_flops_per_token
-            * TOTAL_BATCH_SIZE
-            * steady_state_steps
-            / total_training_time
-            / runtime.gpu_peak_flops
-        )
-    else:
-        steady_state_mfu = None
+    steady_state_mfu = None
     peak_vram_mb = torch.cuda.max_memory_allocated() / 1024 / 1024
     total_tokens = step * TOTAL_BATCH_SIZE
 
