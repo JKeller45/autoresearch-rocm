@@ -55,7 +55,8 @@ The setup script:
 
 - creates `.venv` with Python 3.12
 - installs the pure-Python project dependencies via `uv sync`
-- installs pinned ROCm PyTorch wheels from `repo.radeon.com`
+- removes any stale `torch`/`triton` packages from the venv
+- installs the pinned ROCm 7.2 `torch` wheel plus the matching `pytorch_triton_rocm` wheel from `repo.radeon.com`
 - patches `libhsa-runtime64.so` inside the venv when `/opt/rocm/lib/libhsa-runtime64.so.1` is available
 - verifies `torch.cuda.is_available()` and `torch.version.hip`
 

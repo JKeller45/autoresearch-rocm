@@ -19,6 +19,7 @@ cd "${REPO_ROOT}"
 
 uv venv --python 3.12 .venv
 uv sync --python "${VENV_PYTHON}"
+uv pip uninstall --python "${VENV_PYTHON}" -y torch torchaudio torchvision pytorch-triton-rocm triton >/dev/null 2>&1 || true
 uv pip install --python "${VENV_PYTHON}" -r requirements-rocm-wsl.txt
 
 TORCH_LIB_DIR="$("${VENV_PYTHON}" - <<'PY'
