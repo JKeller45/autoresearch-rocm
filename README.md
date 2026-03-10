@@ -1,8 +1,8 @@
 # autoresearch
 
-> Convert your gaming PC into an autonomous AI researcher.
+> Convert your (gaming) PC into an autonomous AI researcher.
 
-> This repository is a fork of [karpathy/autoresearch](https://github.com/karpathy/autoresearch). This fork targets a single **AMD Radeon GPU via ROCm on WSL2**, with PyTorch HIP using the `torch.cuda` API surface where appropriate.
+> This repository is a fork of [karpathy/autoresearch](https://github.com/karpathy/autoresearch) and [jsegov/autoresearch-win-rtx](https://github.com/jsegov/autoresearch-win-rtx). This fork targets a single **AMD Radeon GPU via ROCm on WSL2**, with PyTorch HIP using the `torch.cuda` API surface where appropriate.
 
 ![teaser](progress.png)
 
@@ -12,7 +12,7 @@ The idea: give an AI agent a small but real LLM training setup and let it experi
 
 ## Fork scope
 
-- Upstream source: [karpathy/autoresearch](https://github.com/karpathy/autoresearch)
+- Upstream source: [jsegov/autoresearch-win-rtx](https://github.com/jsegov/autoresearch-win-rtx), Original Source: [karpathy/autoresearch](https://github.com/karpathy/autoresearch)
 - Primary objective: run on a single AMD Radeon GPU through the officially supported ROCm-on-WSL path
 - Scope of changes: ROCm runtime detection, WSL packaging/setup, and conservative single-GPU stability updates
 - Non-goals: native Windows Radeon training, NVIDIA/CUDA, multi-GPU, FlashAttention/Triton fast paths, `torch.compile`
