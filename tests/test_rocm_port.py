@@ -22,6 +22,26 @@ class DummyTokenizer:
         return rows
 
 
+class FakeEncoding:
+    n_vocab = 3
+
+    def decode(self, ids):
+        mapping = {
+            0: prepare.BOS_TOKEN,
+            1: "a",
+            2: "\ufffd",
+        }
+        return mapping[ids[0]]
+
+    def decode_single_token_bytes(self, token_id):
+        mapping = {
+            0: b"",
+            1: b"a",
+            2: b"\xe2\x82",
+        }
+        return mapping[token_id]
+
+
 class RocmPortTests(unittest.TestCase):
     def test_detect_runtime_requires_hip_backend(self):
         with mock.patch.object(train.torch.cuda, "is_available", return_value=True), \
@@ -126,6 +146,10 @@ class RocmPortTests(unittest.TestCase):
         self.assertEqual(call_args["k_shape"][1], 4)
         self.assertEqual(call_args["v_shape"][1], 4)
         self.assertFalse(call_args["enable_gqa"])
+
+    def test_token_byte_lookup_uses_raw_token_bytes(self):
+        token_bytes = prepare._build_token_bytes_tensor(FakeEncoding())
+        self.assertEqual(token_bytes.tolist(), [0, 1, 2])
 
 
 if __name__ == "__main__":
