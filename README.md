@@ -42,7 +42,7 @@ Prerequisites:
 
 1. Install the current AMD Adrenalin driver with WSL support on the Windows host.
 2. Create an Ubuntu 24.04 WSL2 instance.
-3. Install the system ROCm WSL components inside Ubuntu so `/opt/rocm` is present.
+3. Install the system ROCm WSL components inside Ubuntu so `/opt/rocm` is present. More info on installing ROCm on WSL can be found [here](https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/install/installrad/wsl/install-radeon.html).
 4. Install `uv`.
 
 Repository setup inside WSL:
