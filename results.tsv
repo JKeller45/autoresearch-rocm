@@ -1,0 +1,9 @@
+commit	val_bpb	memory_gb	status	description
+3dd502d	1.816492	3.0	keep	baseline
+381e5b9	1.840382	11.8	discard	use batch_size 16 without checkpointing on 16GB ROCm profile
+df50ade	1.735543	3.0	keep	delay LR warmdown from 50% of run to final 20%
+de13349	1.730440	3.0	keep	delay LR warmdown further to final 10%
+ec4009c	1.784816	3.0	discard	delay LR warmdown to final 5%
+f326d13	1.784239	3.0	discard	keep LR floor at 10% during final warmdown
+a4aaafb	1.731908	3.0	discard	lower weight decay from 0.2 to 0.1
+d58ca2a	1.789054	3.0	discard	raise warmdown ratio slightly from 0.10 to 0.12
