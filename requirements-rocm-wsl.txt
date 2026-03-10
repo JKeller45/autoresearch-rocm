@@ -1,4 +1,6 @@
 # Official ROCm WSL wheel set pinned to the ROCm 7.2 / Python 3.12 path.
 # Keep this minimal: this repo only needs torch plus the matching ROCm Triton wheel.
-https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2/torch-2.8.0%2Brocm7.2.0.gitf717b2cb-cp312-cp312-linux_x86_64.whl
-https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2/pytorch_triton_rocm-3.4.0%2Brocm7.2.0.gitae9ed8c6-cp312-cp312-linux_x86_64.whl
+https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2/triton-3.5.1%2Brocm7.2.0.gita272dfa8-cp312-cp312-linux_x86_64.whl
+https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2/torch-2.9.1%2Brocm7.2.0.lw.git7e1940d4-cp312-cp312-linux_x86_64.whl
+https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2/torchvision-0.25.0%2Brocm7.2.0.git82df5f59-cp312-cp312-linux_x86_64.whl
+https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2/torchaudio-2.9.0%2Brocm7.2.0.gite3c6ee2b-cp312-cp312-linux_x86_64.whl
