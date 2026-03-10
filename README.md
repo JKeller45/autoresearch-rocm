@@ -8,7 +8,7 @@
 
 *One day, frontier AI research used to be done by meat computers in between eating, sleeping, having other fun, and synchronizing once in a while using sound wave interconnect in the ritual of "group meeting". That era is long gone. Research is now entirely the domain of autonomous swarms of AI agents running across compute cluster megastructures in the skies. The agents claim that we are now in the 10,205th generation of the code base, in any case no one could tell if that's right or wrong as the "code" is now a self-modifying binary that has grown beyond human comprehension. This repo is the story of how it all began. -@karpathy, March 2026*.
 
-The idea: give an AI agent a small but real LLM training setup and let it experiment autonomously overnight. It modifies the code, trains for 5 minutes, checks if the result improved, keeps or discards, and repeats. You wake up in the morning to a log of experiments and, hopefully, a better model.
+The idea: give an AI agent a small but real LLM training setup and let it experiment autonomously overnight. It modifies the code, trains for 5 minutes, checks if the result improved, keeps or discards, and repeats. You wake up in the morning to a log of experiments and (hopefully) a better model. The training code here is a simplified single-GPU implementation of nanochat. The core idea is that you're not touching any of the Python files like you normally would as a researcher. Instead, you are programming the program.md Markdown files that provide context to the AI agents and set up your autonomous research org. The default program.md in this repo is intentionally kept as a bare bones baseline, though it's obvious how one would iterate on it over time to find the "research org code" that achieves the fastest research progress, how you'd add more agents to the mix, etc. A bit more context on this project is here in this tweet.
 
 ## Fork scope
 
@@ -20,7 +20,9 @@ The idea: give an AI agent a small but real LLM training setup and let it experi
 ## Platform policy
 
 - Supported path: Windows host + WSL2 + Ubuntu 24.04 + Python 3.12 + AMD ROCm WSL stack
-- Native Windows Radeon PyTorch is not supported here for training
+  - Tested on RX 9070XT (16Gb) on Windows 11 + WSL2 + Ubuntu 24.04 + Python 3.12 + AMD ROCm WSL stack
+  - True Linux and other ROCm supported GPUs should function with minimal to minor code changes
+- Native Windows Radeon PyTorch is not supported here for training (this is a ROCm limitation)
 - The runtime is AMD-only and hard-fails unless PyTorch reports a HIP backend via `torch.version.hip`
 - PyTorch ROCm intentionally reuses the `torch.cuda` API surface, so this repo still uses `torch.device("cuda")`, `torch.cuda.synchronize()`, and related APIs
 
